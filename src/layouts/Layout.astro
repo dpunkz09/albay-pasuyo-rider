@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 
 interface Props {
   title: string;
-  activePage?: 'home' | 'settings';
+  activePage?: 'home' | 'settings' | 'manual';
 }
 const { title, activePage = 'home' } = Astro.props;
 
@@ -42,8 +42,13 @@ const isAdminLoggedIn = !!(token && verifySessionToken(token));
       }
 
       /* ── Map heights ── */
-      #map         { height: 260px; border-radius: 10px; border: 1px solid #e5e7eb; }
-      #settings-map{ height: 280px; border-radius: 10px; border: 1px solid #e5e7eb; }
+      #map         { height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; }
+      #settings-map{ height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; }
+      
+      @media (min-width: 640px) {
+        #map         { height: 260px; }
+        #settings-map{ height: 280px; }
+      }
 
       /* ── Spinner animation (used in inline scripts via class name) ── */
       .sw-spin {
@@ -62,47 +67,59 @@ const isAdminLoggedIn = !!(token && verifySessionToken(token));
 
     <!-- ── Top nav ── -->
     <nav class="sticky top-0 z-50 border-b border-border bg-white shadow-sm">
-      <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-        <a href="/" class="flex items-center gap-3">
-          <img src="/logo.png" alt="Albay Pasuyo Rider" class="h-10 w-10 rounded-full object-cover" />
-          <span class="text-lg font-semibold text-foreground">Albay Pasuyo Rider</span>
+      <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+        <a href="/" class="flex items-center gap-2 sm:gap-3">
+          <img src="/logo.png" alt="Albay Pasuyo Rider" class="h-8 w-8 sm:h-10 sm:w-10 rounded-full object-cover" />
+          <span class="text-base sm:text-lg font-semibold text-foreground hidden xs:inline">Albay Pasuyo Rider</span>
         </a>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1 sm:gap-2">
           <a
             href="/"
             class:list={[
-              'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+              'flex items-center gap-1 sm:gap-2 rounded-lg px-2 sm:px-4 py-2 text-sm font-medium transition-all',
               activePage === 'home'
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',
             ]}
           >
             <span class="material-symbols-outlined text-lg">calculate</span>
-            Calculator
+            <span class="hidden sm:inline">Calculator</span>
+          </a>
+          <a
+            href="/manual"
+            class:list={[
+              'flex items-center gap-1 sm:gap-2 rounded-lg px-2 sm:px-4 py-2 text-sm font-medium transition-all',
+              activePage === 'manual'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            ]}
+          >
+            <span class="material-symbols-outlined text-lg">straighten</span>
+            <span class="hidden sm:inline">Manual Distance</span>
           </a>
           {isAdminLoggedIn ? (
             <a
               href="/settings"
               class:list={[
-                'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                'flex items-center gap-1 sm:gap-2 rounded-lg px-2 sm:px-4 py-2 text-sm font-medium transition-all',
                 activePage === 'settings'
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground',
               ]}
             >
               <span class="material-symbols-outlined text-lg">settings</span>
-              Settings
+              <span class="hidden sm:inline">Settings</span>
             </a>
           ) : (
             <a
               href="/login"
               class:list={[
-                'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                'flex items-center gap-1 sm:gap-2 rounded-lg px-2 sm:px-4 py-2 text-sm font-medium transition-all',
                 'text-muted-foreground hover:bg-muted hover:text-foreground',
               ]}
             >
               <span class="material-symbols-outlined text-lg">admin_panel_settings</span>
-              Admin
+              <span class="hidden sm:inline">Admin</span>
             </a>
           )}
         </div>
@@ -110,7 +127,7 @@ const isAdminLoggedIn = !!(token && verifySessionToken(token));
     </nav>
 
     <!-- ── Page content ── -->
-    <main class="mx-auto max-w-5xl px-6 py-10">
+    <main class="mx-auto max-w-5xl px-4 sm:px-6 py-6 sm:py-10">
       <slot />
     </main>
 

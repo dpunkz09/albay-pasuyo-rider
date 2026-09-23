@@ -16,7 +16,7 @@ module.exports = {
         // will be silently dropped by the browser and you won't be able to log in.
         COOKIE_SECURE: 'true',
         // Uncomment and set a strong random secret before deploying:
-        SESSION_SECRET: 'f3g4cvty35b6uj6tw3cw6ahWEg5etbu',
+        SESSION_SECRET: 'cG/QzIq0/G4gmVTR3IpCB6koXnjVVRO7L/vZYny2lKsP+L6GM3h+Evl6XDEVY6oIfLmzLJek7dd/ptFUYDZxsA=='
       },
 
       // Restart policy
