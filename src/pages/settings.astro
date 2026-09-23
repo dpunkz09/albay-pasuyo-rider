@@ -1,0 +1,272 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { verifySessionToken, COOKIE_NAME } from '../lib/auth';
+import { getSettings } from '../lib/db';
+import { Alert, AlertDescription } from '../components/starwind/alert';
+import { Button } from '../components/starwind/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/starwind/card';
+import { Input } from '../components/starwind/input';
+import { Label } from '../components/starwind/label';
+
+const token = Astro.cookies.get(COOKIE_NAME)?.value;
+if (!(token && verifySessionToken(token))) return Astro.redirect('/login?from=/settings');
+
+const s = getSettings();
+---
+
+<Layout title="Settings" activePage="settings">
+
+  <!-- Alerts -->
+  <Alert id="save-alert" variant="success" class="mb-4 hidden">
+    <span class="material-symbols-outlined">check_circle</span>
+    <AlertDescription>Settings saved successfully!</AlertDescription>
+  </Alert>
+  <Alert id="error-alert" variant="error" class="mb-4 hidden">
+    <span class="material-symbols-outlined">error</span>
+    <AlertDescription><span id="error-msg">Failed to save settings.</span></AlertDescription>
+  </Alert>
+
+  <!-- Session banner -->
+  <div class="mb-6 flex items-center justify-between rounded-xl border border-border bg-gradient-to-r from-muted/40 to-muted/20 px-5 py-4 shadow-sm">
+    <div class="flex items-center gap-3">
+      <span class="material-symbols-outlined text-2xl text-primary">admin_panel_settings</span>
+      <span class="text-sm text-muted-foreground">Logged in as <strong class="text-foreground">admin</strong></span>
+    </div>
+    <Button id="logout-btn" variant="outline" size="sm" class="flex items-center gap-1.5">
+      <span class="material-symbols-outlined text-base">logout</span>
+      Logout
+    </Button>
+  </div>
+
+  <!-- Fixed point card -->
+  <Card class="mb-6">
+    <CardHeader>
+      <div class="flex items-center gap-3">
+        <span class="material-symbols-outlined text-2xl text-primary">location_on</span>
+        <div class="flex-1">
+          <CardTitle>Fixed Pickup / Origin Point</CardTitle>
+          <CardDescription class="mt-1">
+            The store or pickup location. All distances are measured from this coordinate.
+          </CardDescription>
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div class="mb-5 grid grid-cols-2 gap-4">
+        <div class="flex flex-col gap-2">
+          <Label for="fixed-lat" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">south</span>
+            Latitude
+          </Label>
+          <Input type="number" id="fixed-lat" step="any" value={s.fixedLat} placeholder="e.g. 13.1391" />
+        </div>
+        <div class="flex flex-col gap-2">
+          <Label for="fixed-lng" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">east</span>
+            Longitude
+          </Label>
+          <Input type="number" id="fixed-lng" step="any" value={s.fixedLng} placeholder="e.g. 123.7438" />
+        </div>
+      </div>
+      <Alert variant="info" class="mb-4">
+        <span class="material-symbols-outlined">info</span>
+        <AlertDescription>Click anywhere on the map or drag the marker to update coordinates.</AlertDescription>
+      </Alert>
+      <div id="settings-map" class="rounded-xl overflow-hidden shadow-sm"></div>
+    </CardContent>
+  </Card>
+
+  <!-- Fee config card -->
+  <Card class="mb-8">
+    <CardHeader>
+      <div class="flex items-center gap-3">
+        <span class="material-symbols-outlined text-2xl text-primary">payments</span>
+        <CardTitle>Delivery Fee Configuration</CardTitle>
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div class="mb-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <div class="flex flex-col gap-2">
+          <Label for="base-fee" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">currency_exchange</span>
+            Base Fee (₱)
+          </Label>
+          <Input type="number" id="base-fee" min="0" step="0.01" value={s.baseFee} placeholder="e.g. 50" />
+          <p class="text-xs text-muted-foreground">Flat fee regardless of distance</p>
+        </div>
+        <div class="flex flex-col gap-2">
+          <Label for="fee-per-km" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">two_wheeler</span>
+            Fee per Kilometer (₱/km)
+          </Label>
+          <Input type="number" id="fee-per-km" min="0" step="0.01" value={s.feePerKm} placeholder="e.g. 10" />
+          <p class="text-xs text-muted-foreground">Added on top of base fee per km</p>
+        </div>
+      </div>
+      <div class="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <div class="flex flex-col gap-2">
+          <Label for="free-km" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">card_giftcard</span>
+            Free Distance (km)
+          </Label>
+          <Input type="number" id="free-km" min="0" step="0.1" value={s.freeKm} placeholder="e.g. 1" />
+          <p class="text-xs text-muted-foreground">Included in base fee (0 = none)</p>
+        </div>
+        <div class="flex flex-col gap-2">
+          <Label for="max-km" class="flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-base">social_distance</span>
+            Max Service Range (km)
+          </Label>
+          <Input type="number" id="max-km" min="0" step="0.5" value={s.maxKm} placeholder="e.g. 20" />
+          <p class="text-xs text-muted-foreground">0 = no limit</p>
+        </div>
+      </div>
+
+      <Alert id="fee-preview" variant="info">
+        <span class="material-symbols-outlined">calculate</span>
+        <AlertDescription><strong id="preview-text"></strong></AlertDescription>
+      </Alert>
+    </CardContent>
+  </Card>
+
+  <Button id="save-btn" variant="primary" size="lg" class="w-full flex items-center justify-center gap-2 text-base">
+    <span class="material-symbols-outlined">save</span>
+    Save Settings
+  </Button>
+
+  <script>
+    import L from 'leaflet';
+  import iconUrl       from 'leaflet/dist/images/marker-icon.png';
+  import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
+  import shadowUrl     from 'leaflet/dist/images/marker-shadow.png';
+  // @ts-ignore
+  delete L.Icon.Default.prototype._getIconUrl;
+  L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl });
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const latInput   = document.getElementById('fixed-lat')  as HTMLInputElement;
+  const lngInput   = document.getElementById('fixed-lng')  as HTMLInputElement;
+  const baseFeeIn  = document.getElementById('base-fee')   as HTMLInputElement;
+  const feePerKmIn = document.getElementById('fee-per-km') as HTMLInputElement;
+  const freeKmIn   = document.getElementById('free-km')    as HTMLInputElement;
+  const maxKmIn    = document.getElementById('max-km')     as HTMLInputElement;
+  const saveBtn    = document.getElementById('save-btn')   as HTMLButtonElement;
+  const saveAlert  = document.getElementById('save-alert')!;
+  const errAlert   = document.getElementById('error-alert')!;
+  const errMsg     = document.getElementById('error-msg')!;
+  const logoutBtn  = document.getElementById('logout-btn') as HTMLButtonElement;
+  const previewTxt = document.getElementById('preview-text')!;
+
+  // ── Map ────────────────────────────────────────────────────────────────────
+  const initLat = parseFloat(latInput.value);
+  const initLng = parseFloat(lngInput.value);
+
+  const storeIcon = L.divIcon({
+    html: '<span class="material-symbols-outlined" style="font-size:32px;color:#f97316;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3));">store</span>',
+    iconSize: [32, 32], iconAnchor: [16, 32], className: '',
+  });
+
+  const map    = L.map('settings-map').setView([initLat, initLng], 14);
+  const marker = L.marker([initLat, initLng], { draggable: true, icon: storeIcon })
+    .addTo(map).bindPopup('<div class="flex items-center gap-2"><span class="material-symbols-outlined">store</span>Pickup point — drag to reposition</div>').openPopup();
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(map);
+
+  marker.on('dragend', (e: L.LeafletEvent) => {
+    const p = (e.target as L.Marker).getLatLng();
+    latInput.value = p.lat.toFixed(6);
+    lngInput.value = p.lng.toFixed(6);
+  });
+  map.on('click', (e: L.LeafletMouseEvent) => {
+    marker.setLatLng(e.latlng);
+    latInput.value = e.latlng.lat.toFixed(6);
+    lngInput.value = e.latlng.lng.toFixed(6);
+  });
+
+  function syncMapFromInputs() {
+    const lat = parseFloat(latInput.value), lng = parseFloat(lngInput.value);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      marker.setLatLng(L.latLng(lat, lng));
+      map.setView(L.latLng(lat, lng), map.getZoom());
+    }
+  }
+  latInput.addEventListener('change', syncMapFromInputs);
+  lngInput.addEventListener('change', syncMapFromInputs);
+
+  // ── Cleanup on page unload ────────────────────────────────────────────────
+  window.addEventListener('beforeunload', () => {
+    if (map) {
+      map.remove();
+    }
+  });
+
+  // ── Live preview ───────────────────────────────────────────────────────────
+  function updatePreview() {
+    const base  = parseFloat(baseFeeIn.value)  || 0;
+    const perKm = parseFloat(feePerKmIn.value) || 0;
+    const free  = parseFloat(freeKmIn.value)   || 0;
+    const maxKm = parseFloat(maxKmIn.value)    || 0;
+    previewTxt.textContent =
+      `₱${base} base + ₱${perKm}/km` +
+      (free  > 0 ? ` (first ${free} km free)` : '') +
+      (maxKm > 0 ? ` | max ${maxKm} km` : '');
+  }
+  [baseFeeIn, feePerKmIn, freeKmIn, maxKmIn].forEach(el => el.addEventListener('input', updatePreview));
+  updatePreview();
+
+  // ── Save ───────────────────────────────────────────────────────────────────
+  saveBtn.addEventListener('click', async () => {
+    saveAlert.classList.add('hidden');
+    errAlert.classList.add('hidden');
+
+    const lat = parseFloat(latInput.value), lng = parseFloat(lngInput.value);
+    if (isNaN(lat) || isNaN(lng)) {
+      errMsg.textContent = 'Please enter valid latitude and longitude values.';
+      errAlert.classList.remove('hidden');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="sw-spin"></span> Saving…';
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fixedLat: lat, fixedLng: lng,
+          baseFee:  parseFloat(baseFeeIn.value)  || 0,
+          feePerKm: parseFloat(feePerKmIn.value) || 0,
+          freeKm:   parseFloat(freeKmIn.value)   || 0,
+          maxKm:    parseFloat(maxKmIn.value)     || 0,
+        }),
+      });
+      if (res.ok) {
+        saveAlert.classList.remove('hidden');
+        setTimeout(() => saveAlert.classList.add('hidden'), 3500);
+      } else if (res.status === 401) {
+        window.location.href = '/login?from=/settings';
+      } else {
+        errMsg.textContent = (await res.json()).error ?? 'Failed to save settings.';
+        errAlert.classList.remove('hidden');
+      }
+    } catch {
+      errMsg.textContent = 'Network error. Please try again.';
+      errAlert.classList.remove('hidden');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<span class="material-symbols-outlined">save</span> Save Settings';
+    }
+  });
+
+  // ── Logout ─────────────────────────────────────────────────────────────────
+  logoutBtn.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/';
+  });
+  </script>
+
+</Layout>>

@@ -1,0 +1,382 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getSettings } from '../lib/db';
+import { Alert, AlertDescription } from '../components/starwind/alert';
+import { Button } from '../components/starwind/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/starwind/card';
+
+const s = getSettings();
+---
+
+<Layout title="Delivery Fee Calculator" activePage="home">
+
+  <!-- Result box (hidden until computed) -->
+  <div id="result-box" class="mb-8 hidden overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary-accent shadow-lg">
+    <div class="px-8 py-6 text-center text-primary-foreground">
+      <div class="mb-2 flex items-center justify-center gap-2">
+        <span class="material-symbols-outlined text-2xl">payments</span>
+        <p class="text-sm font-medium opacity-90">Estimated Delivery Fee</p>
+      </div>
+      <p class="mt-2 text-6xl font-bold tracking-tight">₱<span id="fee-value">0</span></p>
+      <p id="fee-breakdown" class="mt-4 text-sm opacity-85 leading-relaxed"></p>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  <Alert id="alert-out-of-range" variant="error" class="mb-4 hidden">
+    <span class="material-symbols-outlined">block</span>
+    <AlertDescription>Sorry, your location is outside our service range.</AlertDescription>
+  </Alert>
+  <Alert id="alert-gps-error" variant="error" class="mb-4 hidden">
+    <span class="material-symbols-outlined">signal_cellular_connected_no_internet_0_bar</span>
+    <AlertDescription><span id="gps-error-msg">Could not get your location.</span></AlertDescription>
+  </Alert>
+
+  <!-- GPS / location card -->
+  <Card class="mb-6">
+    <CardHeader>
+      <div class="flex items-center gap-3">
+        <span class="material-symbols-outlined text-2xl text-primary">location_on</span>
+        <CardTitle>Your Delivery Location</CardTitle>
+      </div>
+    </CardHeader>
+    <CardContent>
+      <Alert id="gps-status" variant="info" class="mb-5">
+        <span class="material-symbols-outlined">info</span>
+        <AlertDescription>Press the button below to detect your current location.</AlertDescription>
+      </Alert>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Button id="btn-gps" variant="primary" class="flex items-center justify-center gap-2">
+          <span class="material-symbols-outlined">my_location</span>
+          Detect My Location
+        </Button>
+        <Button id="btn-manual" variant="outline" class="flex items-center justify-center gap-2">
+          <span class="material-symbols-outlined">edit_location</span>
+          Use Map Pin Instead
+        </Button>
+      </div>
+    </CardContent>
+  </Card>
+
+  <!-- Map card -->
+  <Card class="mb-6" id="map-card">
+    <CardHeader>
+      <div class="flex items-center gap-3">
+        <span class="material-symbols-outlined text-2xl text-primary">map</span>
+        <div class="flex-1">
+          <CardTitle>Delivery Map</CardTitle>
+          <CardDescription class="mt-1">
+            Click the map or drag the pin to set your delivery address
+          </CardDescription>
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div id="map" class="rounded-xl overflow-hidden shadow-sm"></div>
+      <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+        <div class="flex items-center gap-1.5 text-muted-foreground">
+          <span class="material-symbols-outlined text-lg text-secondary">store</span>
+          <span>Store Location</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-muted-foreground">
+          <span class="material-symbols-outlined text-lg text-primary">home</span>
+          <span>Your Location</span>
+        </div>
+        <span id="distance-display" class="ml-auto flex items-center gap-1.5 font-semibold text-primary"></span>
+      </div>
+    </CardContent>
+  </Card>
+
+  <!-- Compute button -->
+  <Button id="btn-compute" variant="success" size="lg" class="mb-8 w-full flex items-center justify-center gap-2 text-base" disabled>
+    <span class="material-symbols-outlined">calculate</span>
+    Compute Delivery Fee
+  </Button>
+
+  <!-- Settings JSON for client script -->
+  <script type="application/json" id="app-config" set:html={JSON.stringify({
+    fixedLat:  s.fixedLat,
+    fixedLng:  s.fixedLng,
+    baseFee:   s.baseFee,
+    feePerKm:  s.feePerKm,
+    freeKm:    s.freeKm,
+    maxKm:     s.maxKm,
+  })} />
+
+  <script>
+    import L from 'leaflet';
+    import iconUrl       from 'leaflet/dist/images/marker-icon.png';
+    import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
+    import shadowUrl     from 'leaflet/dist/images/marker-shadow.png';
+    // @ts-ignore
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl });
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    const cfg        = JSON.parse(document.getElementById('app-config')!.textContent!);
+    const FIXED_LAT  = cfg.fixedLat  as number;
+    const FIXED_LNG  = cfg.fixedLng  as number;
+    const BASE_FEE   = cfg.baseFee   as number;
+    const FEE_PER_KM = cfg.feePerKm  as number;
+    const FREE_KM    = cfg.freeKm    as number;
+    const MAX_KM     = cfg.maxKm     as number;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+      const R = 6371, r = Math.PI / 180;
+      const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+      const a = Math.sin(dLat / 2) ** 2
+              + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Get actual road distance using OSRM routing API
+    async function getRoadDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): Promise<number> {
+      try {
+        // Cancel any pending requests
+        if (abortController) {
+          abortController.abort();
+        }
+        abortController = new AbortController();
+        
+        // OSRM public API endpoint - returns driving distance
+        const url = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+        const response = await fetch(url, { signal: abortController.signal });
+        
+        if (!response.ok) throw new Error('Routing API error');
+        
+        const data = await response.json();
+        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+          throw new Error('No route found');
+        }
+        
+        // Distance is in meters, convert to km
+        const distanceKm = data.routes[0].distance / 1000;
+        
+        // Get the route geometry for display on map
+        const geometry = data.routes[0].geometry;
+        if (geometry && geometry.coordinates) {
+          currentRouteGeometry = geometry.coordinates;
+        }
+        
+        return distanceKm;
+      } catch (error) {
+        // Ignore abort errors
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+        console.error('Road distance calculation failed, using straight-line:', error);
+        currentRouteGeometry = null;
+        // Fallback to straight-line distance if API fails
+        return haversineKm(lat1, lng1, lat2, lng2);
+      }
+    }
+
+    function computeFee(d: number) {
+      const billable = Math.max(0, d - FREE_KM);
+      return { fee: BASE_FEE + billable * FEE_PER_KM, billable };
+    }
+    const fmt = (n: number) => n.toFixed(2);
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+    const btnGps          = document.getElementById('btn-gps')         as HTMLButtonElement;
+    const btnManual       = document.getElementById('btn-manual')      as HTMLButtonElement;
+    const btnCompute      = document.getElementById('btn-compute')     as HTMLButtonElement;
+    const gpsStatus       = document.getElementById('gps-status')!;
+    const resultBox       = document.getElementById('result-box')!;
+    const feeValue        = document.getElementById('fee-value')!;
+    const feeBreakdown    = document.getElementById('fee-breakdown')!;
+    const distDisplay     = document.getElementById('distance-display')!;
+    const alertOutOfRange = document.getElementById('alert-out-of-range')!;
+    const alertGpsError   = document.getElementById('alert-gps-error')!;
+    const gpsErrMsg       = document.getElementById('gps-error-msg')!;
+
+    // ── Map state ─────────────────────────────────────────────────────────────
+    let userMarker: L.Marker | null = null;
+    let routeLine:  L.Polyline | null = null;
+    let userLat: number | null = null;
+    let userLng: number | null = null;
+    let currentDistance: number = 0; // Store the calculated distance
+    let currentRouteGeometry: any = null; // Store route geometry from OSRM
+    let abortController: AbortController | null = null; // For cancelling fetch requests
+
+    // ── Cleanup on page unload ────────────────────────────────────────────────
+    window.addEventListener('beforeunload', () => {
+      if (map) {
+        map.remove();
+      }
+      if (abortController) {
+        abortController.abort();
+      }
+    });
+
+    // ── Icons ─────────────────────────────────────────────────────────────────
+    const materialIcon = (iconName: string, color: string = '#1d4ed8') => L.divIcon({
+      html: `<span class="material-symbols-outlined" style="font-size:32px;color:${color};filter:drop-shadow(0 2px 4px rgba(0,0,0,.3));">${iconName}</span>`,
+      iconSize: [32, 32], iconAnchor: [16, 32], className: '',
+    });
+
+    // ── Init map ──────────────────────────────────────────────────────────────
+    const map = L.map('map').setView([FIXED_LAT, FIXED_LNG], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    L.marker([FIXED_LAT, FIXED_LNG], { icon: materialIcon('store', '#f97316') })
+      .addTo(map).bindPopup('<div class="flex items-center gap-2"><span class="material-symbols-outlined">store</span>Store / Origin point</div>');
+    map.on('click', (e: L.LeafletMouseEvent) => placeUserMarker(e.latlng.lat, e.latlng.lng, 'map-click'));
+
+    // ── Place user marker ─────────────────────────────────────────────────────
+    async function placeUserMarker(lat: number, lng: number, source: string) {
+      userLat = lat; userLng = lng;
+
+      if (userMarker) {
+        userMarker.setLatLng([lat, lng]);
+      } else {
+        userMarker = L.marker([lat, lng], { draggable: true, icon: materialIcon('home', '#2563eb') })
+          .addTo(map).bindPopup('<div class="flex items-center gap-2"><span class="material-symbols-outlined">home</span>Your delivery location — drag to adjust</div>');
+        userMarker.on('dragend', (e: L.LeafletEvent) => {
+          const p = (e.target as L.Marker).getLatLng();
+          placeUserMarker(p.lat, p.lng, 'drag');
+        });
+      }
+
+      if (routeLine) map.removeLayer(routeLine);
+      
+      // Show loading state
+      distDisplay.innerHTML = `<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span>Calculating...`;
+      
+      // Get actual road distance
+      try {
+        const d = await getRoadDistanceKm(FIXED_LAT, FIXED_LNG, lat, lng);
+        
+        // Draw the actual route if available, otherwise simple line
+        if (currentRouteGeometry && currentRouteGeometry.length > 0) {
+          // Convert GeoJSON coordinates [lng, lat] to Leaflet LatLng [lat, lng]
+          const routeCoords = currentRouteGeometry.map((coord: [number, number]) => [coord[1], coord[0]] as [number, number]);
+          routeLine = L.polyline(routeCoords, {
+            color: '#2563eb', weight: 4, opacity: 0.7,
+          }).addTo(map);
+        } else {
+          // Fallback to simple line
+          routeLine = L.polyline([[FIXED_LAT, FIXED_LNG], [lat, lng]], {
+            color: '#1d4ed8', weight: 3, dashArray: '8 6', opacity: .75,
+          }).addTo(map);
+        }
+        
+        map.fitBounds(L.latLngBounds([FIXED_LAT, FIXED_LNG], [lat, lng]).pad(0.15));
+
+        distDisplay.innerHTML = `<span class="material-symbols-outlined text-lg">route</span>${d.toFixed(2)} km`;
+        currentDistance = d; // Store for compute button
+        
+        // Enable the compute button (handle Starwind button properly)
+        btnCompute.disabled = false;
+        btnCompute.removeAttribute('disabled');
+        btnCompute.removeAttribute('data-disabled');
+        btnCompute.removeAttribute('aria-disabled');
+        
+        hideAlerts();
+      } catch (error) {
+        // Handle aborted requests silently
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        // Show error for other failures
+        console.error('Error calculating distance:', error);
+        distDisplay.innerHTML = `<span class="material-symbols-outlined text-lg text-error">error</span>Error calculating distance`;
+      }
+
+      if (source !== 'manual') {
+        setGpsStatus(source === 'gps' ? 'success' : 'info',
+          source === 'gps' ? 'GPS location detected successfully!' : 'Location set from map pin.');
+      }
+    }
+
+    // ── GPS button ────────────────────────────────────────────────────────────
+    btnGps.addEventListener('click', async () => {
+      if (!navigator.geolocation) { showGpsError('Geolocation not supported by your browser.'); return; }
+      btnGps.disabled = true;
+      btnGps.innerHTML = '<span class="sw-spin"></span> Detecting…';
+      setGpsStatus('info', 'Requesting location access…');
+      hideAlerts();
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          btnGps.disabled = false;
+          btnGps.innerHTML = '<span class="material-symbols-outlined">my_location</span> Detect My Location';
+          await placeUserMarker(pos.coords.latitude, pos.coords.longitude, 'gps');
+          
+          // Auto-compute fee after GPS detection (wait for distance calculation)
+          if (currentDistance > 0) {
+            setTimeout(() => {
+              btnCompute.click();
+            }, 100);
+          }
+        },
+        (err) => {
+          btnGps.disabled = false;
+          btnGps.innerHTML = '<span class="material-symbols-outlined">my_location</span> Detect My Location';
+          const msgs: Record<number, string> = {
+            1: 'Location access denied. Allow permission and try again.',
+            2: 'Position unavailable. Check your GPS signal.',
+            3: 'Location request timed out. Try again.',
+          };
+          showGpsError(msgs[err.code] ?? 'Could not get your location.');
+          setGpsStatus('warning', 'Could not auto-detect. Use the map pin instead.');
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+      );
+    });
+
+    // ── Manual pin hint ───────────────────────────────────────────────────────
+    btnManual.addEventListener('click', () => {
+      setGpsStatus('info', 'Click anywhere on the map to drop your delivery pin.');
+      document.getElementById('map-card')!.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // ── Compute fee ───────────────────────────────────────────────────────────
+    btnCompute.addEventListener('click', () => {
+      if (userLat === null || userLng === null) return;
+      alertOutOfRange.classList.add('hidden');
+      resultBox.classList.add('hidden');
+
+      const d = currentDistance; // Use stored road distance
+      if (MAX_KM > 0 && d > MAX_KM) { alertOutOfRange.classList.remove('hidden'); return; }
+
+      const { fee, billable } = computeFee(d);
+      const freeNote = FREE_KM > 0 ? ` (first ${FREE_KM} km free)` : '';
+      feeValue.textContent   = fmt(fee);
+      feeBreakdown.innerHTML =
+        `<div class="flex items-center justify-center gap-2"><span class="material-symbols-outlined text-base">route</span>${d.toFixed(2)} km road distance${freeNote}</div>` +
+        `<div class="flex items-center justify-center gap-2 mt-1"><span class="material-symbols-outlined text-base">payments</span>₱${fmt(BASE_FEE)} base + ${billable.toFixed(2)} km × ₱${fmt(FEE_PER_KM)}/km</div>`;
+      resultBox.classList.remove('hidden');
+      resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function hideAlerts() {
+      alertOutOfRange.classList.add('hidden');
+      alertGpsError.classList.add('hidden');
+    }
+    function showGpsError(msg: string) {
+      gpsErrMsg.textContent = msg;
+      alertGpsError.classList.remove('hidden');
+    }
+    function setGpsStatus(variant: string, text: string) {
+      gpsStatus.setAttribute('data-variant', variant);
+      gpsStatus.className = gpsStatus.className
+        .replace(/\btext-\S+\b|\bbg-\S+\b|\bborder-\S+\b/g, '');
+      const variantMap: Record<string, string> = {
+        info:    'border-info bg-info/7',
+        success: 'border-success bg-success/7',
+        warning: 'border-warning bg-warning/7',
+        error:   'border-error bg-error/7',
+      };
+      gpsStatus.className += ` ${variantMap[variant] ?? ''}`;
+      const desc = gpsStatus.querySelector('[data-slot="alert-description"]');
+      if (desc) desc.textContent = text;
+    }
+  </script>
+
+</Layout>

@@ -1,0 +1,102 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { verifySessionToken, COOKIE_NAME } from '../lib/auth';
+import { Alert, AlertDescription } from '../components/starwind/alert';
+import { Button } from '../components/starwind/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/starwind/card';
+import { Input } from '../components/starwind/input';
+import { Label } from '../components/starwind/label';
+
+const token = Astro.cookies.get(COOKIE_NAME)?.value;
+if (token && verifySessionToken(token)) return Astro.redirect('/settings');
+
+const redirectTo = Astro.url.searchParams.get('from') ?? '/settings';
+---
+
+<Layout title="Admin Login" activePage="settings">
+  <div class="mx-auto mt-16 max-w-md">
+
+    <Card class="shadow-lg">
+      <CardHeader class="text-center pb-6">
+        <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+          <span class="material-symbols-outlined text-5xl text-primary">admin_panel_settings</span>
+        </div>
+        <CardTitle class="text-2xl">Admin Login</CardTitle>
+        <CardDescription class="mt-2">Enter the admin password to access settings.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Alert id="error-alert" variant="error" class="mb-5 hidden">
+          <span class="material-symbols-outlined">error</span>
+          <AlertDescription><span id="error-msg">Invalid password. Please try again.</span></AlertDescription>
+        </Alert>
+
+        <form id="login-form" class="flex flex-col gap-5">
+          <div class="flex flex-col gap-2">
+            <Label for="password" class="flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-base">lock</span>
+              Password
+            </Label>
+            <Input
+              type="password"
+              id="password"
+              name="password"
+              autocomplete="current-password"
+              placeholder="Enter admin password"
+              required
+              autofocus
+            />
+          </div>
+          <Button type="submit" variant="primary" size="lg" id="login-btn" class="w-full flex items-center justify-center gap-2 text-base">
+            <span class="material-symbols-outlined">lock_open</span>
+            Login
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <p class="mt-6 text-center text-sm text-muted-foreground">
+      <a href="/" class="inline-flex items-center gap-1.5 underline underline-offset-4 hover:text-foreground transition-colors">
+        <span class="material-symbols-outlined text-base">arrow_back</span>
+        Back to Calculator
+      </a>
+    </p>
+
+  </div>
+</Layout>
+
+<script define:vars={{ redirectTo }}>
+  const form     = document.getElementById('login-form');
+  const pwInput  = document.getElementById('password');
+  const loginBtn = document.getElementById('login-btn');
+  const errAlert = document.getElementById('error-alert');
+  const errMsg   = document.getElementById('error-msg');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errAlert.classList.add('hidden');
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<span class="sw-spin"></span> Verifying…';
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwInput.value }),
+      });
+      if (res.ok) {
+        window.location.href = redirectTo;
+      } else {
+        errMsg.textContent = (await res.json()).error ?? 'Invalid password. Please try again.';
+        errAlert.classList.remove('hidden');
+        pwInput.value = '';
+        pwInput.focus();
+      }
+    } catch {
+      errMsg.textContent = 'Network error. Please try again.';
+      errAlert.classList.remove('hidden');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.innerHTML = '<span class="material-symbols-outlined">lock_open</span> Login';
+    }
+  });
+</script>
